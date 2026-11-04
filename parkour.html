@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Parkour</title>
+<style>
+:root{--bg:#dff1f7;--ink:#17323f;--btn:#17323f;--btn-ink:#fff;color-scheme:light dark;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1d25;--ink:#d8ecf5;--btn:#2b4a5a;--btn-ink:#e8f6ff}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font-family:system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:8px}
+canvas{width:100%;max-width:800px;aspect-ratio:16/9;border-radius:14px;touch-action:none;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.pad{display:flex;justify-content:space-between;align-items:center;width:100%;max-width:800px}
+.pad div{display:flex;gap:12px}
+button{background:var(--btn);color:var(--btn-ink);border:0;border-radius:50%;font-size:30px;width:80px;height:80px;touch-action:none;box-shadow:0 5px 0 rgba(0,0,0,.35);transition:transform .06s,box-shadow .06s}
+button.jump{width:132px;border-radius:40px;font-size:20px;font-weight:700;background:#e8573d;color:#fff}
+button:active,button.on{transform:translateY(4px);box-shadow:0 1px 0 rgba(0,0,0,.35)}
+.overlay{position:fixed;inset:0;background:rgba(5,15,22,.7);display:flex;align-items:center;justify-content:center;padding:16px;z-index:5}
+.overlay[hidden]{display:none}
+.panel{background:var(--bg);color:var(--ink);border-radius:20px;padding:18px;width:100%;max-width:420px;max-height:100%;overflow-y:auto}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.top h2{margin:0;font-size:24px}
+.coin{display:flex;align-items:center;gap:6px;font-size:20px}
+.cd{width:16px;height:16px;border-radius:50%;background:#ffd23f;box-shadow:inset 0 0 0 3px #e0a100}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 0;border-top:1px solid rgba(128,128,128,.3)}
+.info{display:flex;flex-direction:column;gap:2px}
+.info span{font-size:13px;opacity:.75}
+.pips{display:flex;gap:4px;margin-top:4px}
+.pips i{width:16px;height:6px;border-radius:3px;background:rgba(128,128,128,.4)}
+.pips i.f{background:#e8573d}
+button.buy,button.close{width:auto;height:44px;border-radius:22px;font-size:16px;font-weight:700;padding:0 16px;box-shadow:0 3px 0 rgba(0,0,0,.35);white-space:nowrap}
+button.buy{background:#ffd23f;color:#3a2a00}
+button.buy:disabled{opacity:.4}
+button.close{width:100%;margin-top:12px}
+button.shop{width:56px;height:56px;font-size:24px}
+</style>
+</head>
+<body>
+<canvas id="c" width="800" height="450"></canvas>
+<div class="pad">
+  <div><button id="l">◀</button><button id="r">▶</button></div>
+  <button id="s" class="shop">🛒</button>
+  <button id="j" class="jump">Lompat</button>
+</div>
+<div id="shop" class="overlay" hidden><div class="panel"><div class="top"><h2>Toko</h2><span class="coin"><i class="cd"></i><b id="bal">0</b></span></div><div id="list"></div><button id="close" class="close">Tutup</button></div></div>
+<script>
+const c=document.getElementById('c'),g=c.getContext('2d'),W=800,H=450;
+const key={l:0,r:0};let jumpQ=false;
+let plats,nextX,lastY,p,best,dead,last=0,camX=0,parts=[],t=0,rekor=0,shake=0;
+let coins=[],wallet=0,runCoins=0,paused=false;
+const UP={spd:{n:'Kecepatan',d:'Lari lebih kencang',max:5,base:15},jmp:{n:'Tinggi lompat',d:'Lompatan lebih tinggi',max:5,base:15},mj:{n:'Jumlah lompatan',d:'Tambah lompatan di udara',max:2,base:60},mag:{n:'Magnet koin',d:'Koin tertarik ke kamu',max:3,base:30}};
+const lv={spd:0,jmp:0,mj:0,mag:0};
+const save=()=>{try{localStorage.setItem('parkour-save',JSON.stringify({wallet,lv}))}catch(e){}};
+try{rekor=+localStorage.getItem('parkour-rekor')||0;const s=JSON.parse(localStorage.getItem('parkour-save')||'{}');wallet=s.wallet||0;Object.assign(lv,s.lv||{})}catch(e){}
+
+function gen(upto){
+  while(nextX<upto){
+    const w=100+Math.random()*150|0;
+    let y=lastY+(Math.random()*121|0)-60;
+    y=Math.min(380,Math.max(220,y));
+    plats.push({x:nextX,y,w});
+    if(Math.random()<.75){const n=1+Math.random()*4|0,sx=nextX+w/2-(n-1)*14;for(let i=0;i<n;i++)coins.push({x:sx+i*28,y:y-34-(i%2)*14})}
+    lastY=y;nextX+=w+60+(Math.random()*90|0);
+  }
+}
+function reset(){
+  plats=[{x:-200,y:350,w:500}];coins=[];runCoins=0;nextX=380;lastY=350;gen(1500);
+  p={x:50,y:300,vx:0,vy:0,w:30,h:40,ground:false,jumps:0,coyote:0,face:1,sy:1,run:0};
+  best=0;dead=false;camX=p.x;parts=[];
+}
+const hit=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+400&&a.y+a.h>b.y;
+function dust(x,y,n,col){
+  for(let i=0;i<n;i++)parts.push({x,y,vx:(Math.random()-.5)*160,vy:-Math.random()*90,life:.5,max:.5,col});
+}
+
+function update(dt){
+  p.vx=(key.r-key.l)*(280+25*lv.spd);
+  if(p.vx)p.face=Math.sign(p.vx);
+  if(jumpQ){
+    if(p.ground||p.coyote>0){p.vy=-(520+25*lv.jmp);p.jumps=1;p.coyote=0;p.sy=1.3;dust(p.x+15,p.y+40,6,'#e9dcc3')}
+    else if(p.jumps<2+lv.mj){p.vy=-(480+25*lv.jmp);p.jumps++;p.sy=1.3;dust(p.x+15,p.y+40,10,'#ffffff')}
+  }
+  jumpQ=false;
+  p.vy+=1400*dt;
+
+  p.x+=p.vx*dt;
+  for(const r of plats)if(hit(p,r)){
+    if(p.vx>0)p.x=r.x-p.w;else if(p.vx<0)p.x=r.x+r.w;
+  }
+  const was=p.ground;p.ground=false;
+  const vyBefore=p.vy;
+  p.y+=p.vy*dt;
+  for(const r of plats)if(hit(p,r)){
+    if(p.vy>0){
+      p.y=r.y-p.h;p.ground=true;p.jumps=0;
+      if(!was&&vyBefore>350){p.sy=.65;dust(p.x+15,r.y,8,'#e9dcc3')}
+    }else if(p.vy<0)p.y=r.y+400;
+    p.vy=0;
+  }
+  if(p.ground||was)p.coyote=0.1;else p.coyote=Math.max(0,p.coyote-dt);
+  if(p.ground&&p.vx){p.run+=dt*14;if(Math.random()<.25)dust(p.x+15,p.y+40,1,'#e9dcc3')}
+
+  p.sy+=(1-p.sy)*Math.min(1,dt*12);
+  best=Math.max(best,p.x);
+  const mr=50*lv.mag,cx=p.x+15,cy=p.y+20;
+  for(const q of coins){
+    const dx=cx-q.x,dy=cy-q.y,d=Math.hypot(dx,dy);
+    if(mr&&d<mr+20&&d>1){q.x+=dx/d*420*dt;q.y+=dy/d*420*dt}
+    if(d<24){q.got=1;wallet++;runCoins++;dust(q.x,q.y,5,'#ffd23f')}
+  }
+  coins=coins.filter(q=>!q.got&&q.x>p.x-800);
+  gen(p.x+1500);
+  plats=plats.filter(r=>r.x+r.w>p.x-800);
+  if(p.y>H+150){
+    dead=true;shake=.35;save();
+    if(best/10>rekor){rekor=Math.floor(best/10);try{localStorage.setItem('parkour-rekor',rekor)}catch(e){}}
+  }
+}
+
+function hills(par,base,amp,freq,col){
+  g.fillStyle=col;g.beginPath();g.moveTo(0,H);
+  for(let x=0;x<=W;x+=10){
+    const wx=x+camX*par;
+    g.lineTo(x,base-amp*Math.sin(wx*freq)-amp*.5*Math.sin(wx*freq*2.3+1));
+  }
+  g.lineTo(W,H);g.fill();
+}
+function cloud(x,y,s){
+  g.beginPath();g.arc(x,y,16*s,0,7);g.arc(x+18*s,y-8*s,20*s,0,7);g.arc(x+40*s,y,16*s,0,7);g.fill();
+}
+
+function draw(){
+  const sky=g.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,'#4fb6e6');sky.addColorStop(1,'#e3f6ff');
+  g.fillStyle=sky;g.fillRect(0,0,W,H);
+  g.fillStyle='#fff6b0';g.beginPath();g.arc(650,80,38,0,7);g.fill();
+  g.fillStyle='rgba(255,255,255,.85)';
+  for(let i=0;i<5;i++){
+    const cx=((i*230-camX*.15)%1150+1150)%1150-150;
+    cloud(cx,60+(i%3)*45,1+(i%2)*.4);
+  }
+  hills(.25,330,35,.006,'#9bd3b8');
+  hills(.5,390,30,.009,'#6fbf9a');
+
+  g.save();
+  const sx=shake>0?(Math.random()-.5)*10:0;
+  g.translate(Math.round(W*.31-camX+sx),0);
+  for(const r of plats){
+    g.fillStyle='rgba(0,0,0,.12)';g.fillRect(r.x+6,r.y+6,r.w,H);
+    g.fillStyle='#8a5a3b';g.fillRect(r.x,r.y,r.w,H);
+    g.fillStyle='#7a4e32';
+    for(let x=r.x+20;x<r.x+r.w-8;x+=40){g.fillRect(x,r.y+26,18,8);g.fillRect(x+12,r.y+60,14,8)}
+    g.fillStyle='#4fcf6a';g.fillRect(r.x-2,r.y,r.w+4,12);
+    g.fillStyle='#38ad53';g.fillRect(r.x-2,r.y+12,r.w+4,4);
+  }
+  for(const q of parts){
+    g.globalAlpha=Math.max(0,q.life/q.max);g.fillStyle=q.col;
+    g.fillRect(q.x,q.y,5,5);
+  }
+  g.globalAlpha=1;
+
+  for(const q of coins){
+    const w=Math.abs(Math.sin(t*4+q.x*.05))*7+1;
+    g.fillStyle='#e0a100';g.beginPath();g.ellipse(q.x,q.y,w+1.5,9.5,0,0,7);g.fill();
+    g.fillStyle='#ffd23f';g.beginPath();g.ellipse(q.x,q.y,w,8,0,0,7);g.fill();
+  }
+  // pemain
+  g.save();
+  g.translate(p.x+15,p.y+40);g.scale(1/p.sy*.5+.5,p.sy);
+  const sw=p.ground&&p.vx?Math.sin(p.run)*7:0;
+  g.fillStyle='#2b2f4a';
+  g.fillRect(-9+sw,-10,8,10);g.fillRect(1-sw,-10,8,10);
+  g.fillStyle='#e8573d';g.beginPath();g.roundRect(-15,-40,30,32,8);g.fill();
+  g.fillStyle='#ffd9b8';g.fillRect(-11,-36,22,14);
+  g.fillStyle='#fff';g.fillRect(-15,-37,30,5);
+  g.fillStyle='#fff';g.fillRect(p.face>0?-15-8:15,-35,8,3);
+  g.fillStyle='#17323f';g.fillRect(p.face>0?3:-8,-30,4,6);g.fillRect(p.face>0?-3:-2,-30,0,0);
+  g.restore();
+  g.restore();
+
+  // HUD
+  g.font='bold 18px system-ui,sans-serif';g.textAlign='left';
+  const a='Jarak '+Math.floor(best/10)+' m',b='Rekor '+Math.max(rekor,Math.floor(best/10))+' m';
+  g.fillStyle='rgba(23,50,63,.75)';
+  g.beginPath();g.roundRect(10,10,g.measureText(a).width+24,32,16);g.fill();
+  const bw=g.measureText(b).width+24;
+  g.beginPath();g.roundRect(W-10-bw,10,bw,32,16);g.fill();
+  g.fillStyle='#fff';g.fillText(a,22,32);g.fillText(b,W-10-bw+12,32);
+  const cw=g.measureText(String(wallet)).width+44;
+  g.fillStyle='rgba(23,50,63,.75)';g.beginPath();g.roundRect(10,48,cw,32,16);g.fill();
+  g.fillStyle='#ffd23f';g.beginPath();g.arc(28,64,8,0,7);g.fill();
+  g.fillStyle='#fff';g.fillText(wallet,42,70);
+
+  if(dead){
+    g.fillStyle='rgba(10,25,35,.55)';g.fillRect(0,0,W,H);
+    g.textAlign='center';g.fillStyle='#fff';
+    g.font='bold 44px system-ui,sans-serif';g.fillText('Kamu jatuh!',W/2,H/2-20);
+    g.font='22px system-ui,sans-serif';
+    g.fillText('Jarak '+Math.floor(best/10)+' m  ·  Rekor '+rekor+' m',W/2,H/2+18);
+    g.fillStyle='#ffd23f';g.fillText('+'+runCoins+' koin dikumpulkan',W/2,H/2+52);
+    g.fillStyle='#fff';g.fillText('Tekan Lompat untuk main lagi',W/2,H/2+88);
+  }
+}
+
+function loop(ts){
+  const dt=Math.min(0.033,(ts-last)/1000||0);last=ts;t+=dt;
+  if(!dead&&!paused)update(dt);
+  camX+=(p.x-camX)*Math.min(1,dt*9);
+  shake=Math.max(0,shake-dt);
+  for(const q of parts){q.life-=dt;q.x+=q.vx*dt;q.y+=q.vy*dt;q.vy+=300*dt}
+  parts=parts.filter(q=>q.life>0);
+  draw();requestAnimationFrame(loop);
+}
+
+function jump(){if(paused)return;if(dead)reset();else jumpQ=true}
+function hold(id,on,off){
+  const el=document.getElementById(id);
+  el.addEventListener('pointerdown',e=>{e.preventDefault();el.classList.add('on');on()});
+  for(const ev of['pointerup','pointercancel','pointerleave'])el.addEventListener(ev,()=>{el.classList.remove('on');off()});
+}
+hold('l',()=>key.l=1,()=>key.l=0);
+hold('r',()=>key.r=1,()=>key.r=0);
+hold('j',jump,()=>{});
+c.addEventListener('pointerdown',()=>{if(dead)reset()});
+
+addEventListener('keydown',e=>{
+  if(e.repeat)return;
+  if(['ArrowLeft','a','A'].includes(e.key))key.l=1;
+  if(['ArrowRight','d','D'].includes(e.key))key.r=1;
+  if([' ','ArrowUp','w','W'].includes(e.key)){e.preventDefault();jump()}
+  if(e.key==='r'||e.key==='R')reset();
+});
+addEventListener('keyup',e=>{
+  if(['ArrowLeft','a','A'].includes(e.key))key.l=0;
+  if(['ArrowRight','d','D'].includes(e.key))key.r=0;
+});
+
+const shop=document.getElementById('shop'),list=document.getElementById('list'),bal=document.getElementById('bal');
+const cost=k=>UP[k].base*(lv[k]+1);
+function renderShop(){
+  bal.textContent=wallet;list.innerHTML='';
+  for(const k in UP){
+    const u=UP[k],maxed=lv[k]>=u.max,cs=cost(k);
+    let pips='';for(let i=0;i<u.max;i++)pips+='<i'+(i<lv[k]?' class="f"':'')+'></i>';
+    const row=document.createElement('div');row.className='row';
+    row.innerHTML='<div class="info"><b>'+u.n+'</b><span>'+u.d+'</span><div class="pips">'+pips+'</div></div>';
+    const b=document.createElement('button');b.className='buy';
+    b.textContent=maxed?'Maks':cs+' koin';
+    b.disabled=maxed||wallet<cs;
+    b.onclick=()=>{if(!maxed&&wallet>=cs){wallet-=cs;lv[k]++;save();renderShop()}};
+    row.appendChild(b);list.appendChild(row);
+  }
+}
+function toggleShop(open){paused=open;shop.hidden=!open;key.l=key.r=0;if(open)renderShop();else save()}
+document.getElementById('s').addEventListener('click',()=>toggleShop(true));
+document.getElementById('close').addEventListener('click',()=>toggleShop(false));
+
+reset();requestAnimationFrame(loop);
+</script>
+</body>
+</html>
